@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="dw-bg" x1="14" y1="10" x2="114" y2="118">
+      <stop offset="0%" stop-color="#2563eb"></stop>
+      <stop offset="52%" stop-color="#0ea5e9"></stop>
+      <stop offset="100%" stop-color="#14b8a6"></stop>
+    </linearGradient>
+    <linearGradient id="dw-stroke" x1="24" y1="24" x2="106" y2="106">
+      <stop offset="0%" stop-color="#ffffff"></stop>
+      <stop offset="100%" stop-color="#eaf6ff"></stop>
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="112" height="112" rx="30" fill="url(#dw-bg)"></rect>
+
+  <path d="M34 36 C47 28, 69 28, 84 36 C96 43, 103 55, 103 67 C103 79, 97 91, 84 98 C69 106, 47 106, 34 98" fill="none" stroke="url(#dw-stroke)" stroke-width="10" stroke-linecap="round"></path>
+
+  <path d="M34 36 V98" fill="none" stroke="url(#dw-stroke)" stroke-width="10" stroke-linecap="round"></path>
+
+  <path d="M36 74 C49 60, 57 54, 70 51 C79 49, 88 50, 96 54" fill="none" stroke="#dff7ff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"></path>
+
+  <circle cx="36" cy="74" r="6.5" fill="#ffffff"></circle>
+  <circle cx="70" cy="51" r="6" fill="#dff7ff"></circle>
+  <circle cx="96" cy="54" r="6.5" fill="#ffffff"></circle>
+</svg>
