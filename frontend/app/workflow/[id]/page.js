@@ -7,8 +7,8 @@ function extractTimeParts(value) {
     return { hour: 13, minute: 0, constraint: "after" };
   }
 
-  if (normalized.includes("before lunch")) {
-    return { hour: 11, minute: 30, constraint: "before" };
+  if (normalized.includes("before lunch") || normalized.includes("before noon")) {
+    return { hour: 12, minute: 0, constraint: "before" };
   }
 
   if (normalized.includes("noon")) {
@@ -32,7 +32,11 @@ function extractTimeParts(value) {
 
   let constraint = "at";
 
-  if (normalized.includes("before") || normalized.includes("by ")) {
+  if (
+    normalized.includes("before") ||
+    normalized.includes("by ") ||
+    normalized.startsWith("by ")
+  ) {
     constraint = "before";
   } else if (normalized.includes("after")) {
     constraint = "after";
@@ -65,57 +69,90 @@ function formatMinutes(mins) {
 function normalizeText(value) {
   return String(value || "")
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[_-]/g, " ")
+    .replace(/[^a-z0-9\s:/]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
+function compactText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function titleCase(value) {
+  return String(value || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      if (word.length <= 4 && word === word.toUpperCase()) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(" ");
+}
+
 function canonicalPlace(value) {
-  const normalized = normalizeText(value);
+  const normalized = normalizeText(value)
+    .replace(/\bphilippines\b/g, "")
+    .replace(/\bmetro manila\b/g, "")
+    .replace(/\bprovince\b/g, "")
+    .replace(/\bcity of\b/g, "")
+    .replace(/\bcity\b/g, "")
+    .replace(/\bbarangay\b/g, "")
+    .replace(/\bbrgy\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
   if (!normalized) return "";
 
   if (
     normalized === "home" ||
+    normalized === "house" ||
     normalized.includes("my home") ||
-    normalized.includes("going home")
+    normalized.includes("my house") ||
+    normalized.includes("going home") ||
+    normalized.includes("get home") ||
+    normalized.includes("be home") ||
+    normalized.includes("go home")
   ) {
     return "home";
   }
 
+  if (normalized.includes("bgc") || normalized.includes("bonifacio")) return "bgc";
+  if (normalized.includes("ortigas")) return "ortigas";
   if (normalized.includes("makati")) return "makati";
-
-  if (
-    normalized.includes("bgc") ||
-    normalized.includes("bonifacio") ||
-    normalized.includes("taguig")
-  ) {
-    return "bgc";
-  }
-
-  if (normalized.includes("quezon") || normalized === "qc") {
-    return "quezon-city";
-  }
+  if (normalized.includes("pasig")) return "pasig";
+  if (normalized.includes("quezon") || normalized === "qc") return "quezon-city";
+  if (normalized.includes("alabang") || normalized.includes("muntinlupa")) return "alabang";
 
   return normalized;
 }
 
 function friendlyPlaceName(value) {
-  const place = canonicalPlace(value);
-
-  if (place === "makati") return "Makati";
-  if (place === "bgc") return "BGC";
-  if (place === "quezon-city") return "Quezon City";
-  if (place === "home") return "Home";
-
-  const raw = String(value || "").trim();
+  const raw = compactText(value);
 
   if (!raw) return "Unknown";
 
-  return raw
-    .replace(", Philippines", "")
-    .replace(", Metro Manila", "")
-    .replace("Bonifacio Global City, Taguig", "BGC");
+  const cleaned = raw
+    .replace(/,\s*Philippines/gi, "")
+    .replace(/,\s*Metro Manila/gi, "")
+    .replace(/\s+Philippines$/gi, "")
+    .replace(/\s+Metro Manila$/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned) return "Unknown";
+
+  const key = canonicalPlace(cleaned);
+
+  if (key === "bgc") return "BGC";
+  if (key === "ortigas") return "Ortigas";
+  if (key === "makati") return "Makati";
+  if (key === "pasig") return "Pasig";
+  if (key === "quezon-city") return "Quezon City";
+  if (key === "alabang") return "Alabang";
+  if (key === "home") return "Home";
+
+  return titleCase(cleaned);
 }
 
 function routeDisplayTitle(route) {
@@ -142,168 +179,234 @@ function textMatches(a, b) {
   return matchCount >= Math.min(2, rightWords.length);
 }
 
+function extractLocationPhrase(value) {
+  const text = compactText(value);
+
+  if (!text) return "";
+
+  const patterns = [
+    /\b(?:location:|in|at|to|near|around)\s+([^.,;\n]+)/i,
+    /\bfrom\s+([^.,;\n]+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+
+    if (!match) continue;
+
+    let candidate = compactText(match[1]);
+
+    candidate = candidate
+      .replace(/\s+(before|after|by|then|and|with|for|to pick|to buy|to get|to attend|to meet|but|when|constraint)\b.*$/i, "")
+      .replace(/\b\d{1,2}(?::\d{2})?\s*(am|pm)\b.*$/i, "")
+      .trim();
+
+    if (candidate && looksLikePlace(candidate)) {
+      return candidate;
+    }
+  }
+
+  return "";
+}
+
+function looksLikePlace(value) {
+  const normalized = normalizeText(value);
+
+  if (!normalized || normalized.length < 2) return false;
+
+  const nonPlaceWords = new Set([
+    "lunch",
+    "dinner",
+    "breakfast",
+    "meeting",
+    "call",
+    "presentation",
+    "appointment",
+    "review",
+    "sync",
+    "task",
+    "errand",
+    "work",
+    "it",
+    "that",
+    "materials",
+    "presentation materials",
+    "phone charger",
+    "charger",
+    "pharmacy",
+    "pharmacy nearby",
+    "client meeting",
+    "client sync",
+    "project review",
+  ]);
+
+  return !nonPlaceWords.has(normalized);
+}
+
+function taskLocationKey(task) {
+  const explicit =
+    task?.location ||
+    task?.place ||
+    task?.destination ||
+    extractLocationPhrase(`${task?.title || ""} ${task?.description || ""} ${task?.due_at || ""}`);
+
+  return canonicalPlace(explicit);
+}
+
+function eventLocationKey(event) {
+  return canonicalPlace(event?.location || extractLocationPhrase(`${event?.title || ""}`));
+}
+
 function isFuzzyOnlyTime(value) {
   const normalized = normalizeText(value);
+  const hasExplicitClock = /\b\d{1,2}(?::\d{2})?\s*(am|pm)\b/i.test(String(value || ""));
+
+  if (hasExplicitClock) return false;
 
   return (
     normalized.includes("after") ||
     normalized.includes("before") ||
     normalized.includes("heading") ||
-    normalized.includes("going home")
+    normalized.includes("going home") ||
+    normalized.includes("sometime")
   );
 }
 
 function isDisplayEvent(event) {
-  const start = parseTimeToMinutes(event.start_at);
+  const start = parseTimeToMinutes(event?.start_at);
 
   if (start === null) return false;
-  if (isFuzzyOnlyTime(event.start_at)) return false;
+  if (isFuzzyOnlyTime(event?.start_at)) return false;
 
-  const title = normalizeText(event.title);
+  const title = normalizeText(event?.title);
 
-  if (
-    title.includes("buy ") ||
-    title.includes("pickup") ||
-    title.includes("pick up") ||
-    title.includes("vitamin") ||
-    title.includes("mercury") ||
-    title.includes("printer ink")
-  ) {
-    return false;
-  }
+  const taskLikeWords = [
+    "buy ",
+    "purchase ",
+    "pickup",
+    "pick up",
+    "drop off",
+    "dropoff",
+    "errand",
+    "collect ",
+    "get documents",
+    "get groceries",
+    "stop by",
+  ];
 
-  return true;
+  return !taskLikeWords.some((word) => title.includes(word));
 }
 
 function isBadFallbackTask(task, rawRequest) {
-  const title = normalizeText(task.title);
-  const requestStart = normalizeText(String(rawRequest || "").slice(0, 90));
+  const title = normalizeText(task?.title);
+  const requestStart = normalizeText(String(rawRequest || "").slice(0, 120));
 
   if (!title) return true;
 
   return (
-    title.length > 60 &&
+    title.length > 90 &&
     requestStart.length > 20 &&
-    requestStart.includes(title.slice(0, 40))
+    requestStart.includes(title.slice(0, 55))
   );
 }
 
-function inferTasksFromRequest(rawRequest) {
-  const text = normalizeText(rawRequest);
-  const tasks = [];
-
-  if (text.includes("printer ink")) {
-    tasks.push({
-      id: "inferred-printer-ink",
-      title: "Buy printer ink",
-      description: "Buy printer ink in Makati before heading to BGC.",
-      priority: "medium",
-      due_at: "before heading to BGC",
-      status: "open",
-      source_agent: "TaskAgent",
-      inferred: true,
-    });
-  }
-
-  if (text.includes("mercury") || text.includes("vitamin")) {
-    tasks.push({
-      id: "inferred-mercury-vitamins",
-      title: "Stop by Mercury Drug for vitamins",
-      description:
-        "Stop by Mercury Drug in BGC for vitamins after the presentation.",
-      priority: "medium",
-      due_at: "after the presentation",
-      status: "open",
-      source_agent: "TaskAgent",
-      inferred: true,
-    });
-  }
-
-  if (text.includes("package") && (text.includes("quezon") || text.includes("qc"))) {
-    tasks.push({
-      id: "inferred-qc-package",
-      title: "Pick up package in Quezon City",
-      description: "Pick up the package in Quezon City before going home.",
-      priority: "high",
-      due_at: "before going home by 7 PM",
-      status: "open",
-      source_agent: "TaskAgent",
-      inferred: true,
-    });
-  }
-
-  return tasks;
+function taskCore(value) {
+  return normalizeText(value)
+    .replace(/\b(a|an|the|my|some)\b/g, " ")
+    .replace(/\b(in|at|near|around|from|to|location)\b\s+.+$/g, "")
+    .replace(/\b(before|after|by|when|constraint)\b\s+.+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function taskKey(task) {
-  const title = normalizeText(task.title);
+  const title = normalizeText(task?.title);
+  const core = taskCore(title);
+  const location = taskLocationKey(task);
+  return `${core}-${location}`.replace(/-+$/g, "");
+}
 
-  if (title.includes("printer") && title.includes("ink")) return "printer-ink";
-  if (title.includes("mercury") || title.includes("vitamin")) {
-    return "mercury-vitamins";
-  }
-
-  if (
-    title.includes("package") ||
-    title.includes("pick up") ||
-    title.includes("pickup")
-  ) {
-    return "package-pickup";
-  }
-
-  return title;
+function eventKey(event) {
+  return `${normalizeText(event?.title)}-${normalizeText(event?.start_at)}-${normalizeText(event?.location)}`;
 }
 
 function isTaskDuplicateOfEvent(task, events) {
-  const key = taskKey(task);
-
-  if (key === "printer-ink") return false;
-  if (key === "mercury-vitamins") return false;
-  if (key === "package-pickup") return false;
-
-  const taskTextValue = `${task.title || ""} ${task.description || ""}`;
+  const taskTextValue = `${task?.title || ""} ${task?.description || ""}`;
   const normalizedTask = normalizeText(taskTextValue);
 
-  return events.some((event) => {
-    const eventText = `${event.title || ""} ${event.location || ""}`;
+  if (!normalizedTask) return false;
+
+  const explicitEventWrapper =
+    normalizedTask.includes("attend ") ||
+    normalizedTask.includes("join ") ||
+    normalizedTask.includes("go to meeting") ||
+    normalizedTask.includes("go to review") ||
+    normalizedTask.includes("go to sync") ||
+    normalizedTask.includes("prepare for") ||
+    normalizedTask.includes("prep for");
+
+  if (!explicitEventWrapper) return false;
+
+  return (events || []).some((event) => {
+    const eventText = `${event?.title || ""} ${event?.location || ""}`;
     const normalizedEvent = normalizeText(eventText);
 
-    if (textMatches(normalizedTask, normalizedEvent)) return true;
+    if (!normalizedEvent) return false;
 
     if (
-      normalizedTask.includes("prepare") &&
-      normalizedEvent.includes("prep") &&
-      normalizedEvent.includes("presentation")
+      (normalizedTask.includes("prep") || normalizedTask.includes("prepare")) &&
+      (normalizedEvent.includes("prep") || normalizedEvent.includes("prepare"))
     ) {
       return true;
     }
 
-    if (
-      normalizedTask.includes("attend") &&
-      normalizedTask.includes("presentation") &&
-      normalizedEvent.includes("presentation")
-    ) {
-      return true;
-    }
-
-    return false;
+    return textMatches(normalizedTask, normalizedEvent);
   });
 }
 
 function getDisplayTasks(tasks, events, rawRequest) {
   const cleaned = (tasks || []).filter((task) => !isBadFallbackTask(task, rawRequest));
-  const inferred = inferTasksFromRequest(rawRequest);
   const map = new Map();
 
-  for (const task of [...cleaned, ...inferred]) {
+  for (const task of cleaned) {
     if (isTaskDuplicateOfEvent(task, events)) continue;
 
     const key = taskKey(task);
-    if (!key) continue;
+    const noLocationKey = taskCore(task?.title);
 
-    if (!map.has(key)) {
-      map.set(key, task);
+    if (!key && !noLocationKey) continue;
+
+    const existingExact = map.get(key);
+    const existingCore = Array.from(map.values()).find(
+      (existing) => taskCore(existing?.title) === noLocationKey
+    );
+
+    if (existingExact) {
+      map.set(key, {
+        ...existingExact,
+        description: existingExact.description || task.description,
+        due_at: existingExact.due_at || task.due_at,
+        priority: existingExact.priority || task.priority,
+        status: existingExact.status || task.status,
+        source_agent: existingExact.source_agent || task.source_agent,
+      });
+      continue;
     }
+
+    if (existingCore) {
+      const existingCoreKey = taskKey(existingCore);
+      map.set(existingCoreKey, {
+        ...existingCore,
+        description: existingCore.description || task.description,
+        due_at: existingCore.due_at || task.due_at,
+        priority: existingCore.priority || task.priority,
+        status: existingCore.status || task.status,
+        source_agent: existingCore.source_agent || task.source_agent,
+      });
+      continue;
+    }
+
+    map.set(key || noLocationKey, task);
   }
 
   return Array.from(map.values());
@@ -363,17 +466,6 @@ function getUniqueTravelEstimates(travelEstimates) {
   });
 }
 
-function findRoute(routes, originKey, destinationKey) {
-  return routes.find((route) => {
-    const origin = route.__originKey || canonicalPlace(route.origin || route.resolved_origin);
-    const destination =
-      route.__destinationKey ||
-      canonicalPlace(route.destination || route.resolved_destination);
-
-    return origin === originKey && destination === destinationKey;
-  });
-}
-
 function makeBlock({
   type,
   title,
@@ -402,246 +494,636 @@ function makeBlock({
   };
 }
 
-function durationForRoute(route, fallback = 30) {
-  return Math.max(10, Number(route?.estimated_minutes || fallback));
+function durationForRoute(route, fallback = 35) {
+  const raw = Number(route?.estimated_minutes || fallback);
+
+  if (!Number.isFinite(raw)) return fallback;
+
+  return Math.max(25, Math.round(raw));
 }
 
-function buildPlannerData(tasks, events, finalResponse) {
-  const buffer = 10;
-  const blocks = [];
-  const routeBlocks = [];
+function buildRouteMeta(route, duration) {
+  return `${duration} min by car · ${
+    route.distance_km
+      ? `${route.distance_km} km`
+      : route.mode || "driving"
+  }`;
+}
 
-  const uniqueTravelEstimates = getUniqueTravelEstimates(
-    finalResponse?.travel_estimates || []
+function overlaps(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && aEnd > bStart;
+}
+
+function blockPriority(block) {
+  if (block.type === "event") return 1;
+  if (block.type === "task") return 2;
+  if (block.type === "route") return 3;
+  return 4;
+}
+
+function routeWindow(route) {
+  const routeText = normalizeText(
+    `${route?.depart_after || ""} ${route?.arrive_by || ""} ${route?.purpose || ""}`
   );
 
-  const routeMakatiToBGC = findRoute(uniqueTravelEstimates, "makati", "bgc");
-  const routeBGCToQC = findRoute(uniqueTravelEstimates, "bgc", "quezon-city");
-  const routeQCToHome =
-    findRoute(uniqueTravelEstimates, "quezon-city", "makati") ||
-    findRoute(uniqueTravelEstimates, "quezon-city", "home");
+  let earliest = 8 * 60 + 30;
+  let latest = null;
 
-  const printerTask = tasks.find((task) => taskKey(task) === "printer-ink");
-  const mercuryTask = tasks.find((task) => taskKey(task) === "mercury-vitamins");
-  const packageTask = tasks.find((task) => taskKey(task) === "package-pickup");
-
-  const prepEvent = events.find((event) =>
-    normalizeText(event.title).includes("prep")
-  );
-
-  const presentationEvent = events.find((event) =>
-    normalizeText(event.title).includes("presentation")
-  );
-
-  const prepStart = parseTimeToMinutes(prepEvent?.start_at) ?? 14 * 60;
-  const prepEnd = parseTimeToMinutes(prepEvent?.end_at) ?? 15 * 60;
-  const presentationStart = parseTimeToMinutes(presentationEvent?.start_at) ?? 15 * 60;
-  const presentationEnd = parseTimeToMinutes(presentationEvent?.end_at) ?? 16 * 60;
-
-  if (printerTask) {
-    blocks.push(
-      makeBlock({
-        type: "task",
-        title: printerTask.title,
-        meta: `${printerTask.priority || "medium"} priority · ${
-          printerTask.source_agent || "TaskAgent"
-        }`,
-        start: 9 * 60,
-        end: 9 * 60 + 45,
-        task: printerTask,
-      })
-    );
+  if (routeText.includes("after lunch")) {
+    earliest = Math.max(earliest, 13 * 60);
   }
 
-  if (routeMakatiToBGC) {
-    const duration = durationForRoute(routeMakatiToBGC, 20);
-    const end = prepStart - buffer;
-    const start = Math.max(8 * 60, end - duration);
-
-    const block = makeBlock({
-      type: "route",
-      title: routeDisplayTitle(routeMakatiToBGC),
-      meta: `${duration} min by car · ${
-        routeMakatiToBGC.distance_km
-          ? `${routeMakatiToBGC.distance_km} km`
-          : routeMakatiToBGC.mode || "driving"
-      }`,
-      start,
-      end,
-      location: routeMakatiToBGC.destination || "",
-      route: routeMakatiToBGC,
-    });
-
-    blocks.push(block);
-    routeBlocks.push(block);
+  if (routeText.includes("before noon") || routeText.includes("before lunch")) {
+    latest = 12 * 60;
   }
 
-  if (prepEvent) {
-    blocks.push(
-      makeBlock({
-        type: "event",
-        title: prepEvent.title,
-        meta: prepEvent.location || prepEvent.source_agent || "Event",
-        start: prepStart,
-        end: prepEnd,
-        location: prepEvent.location || "",
-        event: prepEvent,
-      })
-    );
+  const departParts = extractTimeParts(route?.depart_after);
+  const arriveParts = extractTimeParts(route?.arrive_by);
+
+  if (departParts && (departParts.constraint === "after" || departParts.constraint === "at")) {
+    earliest = Math.max(earliest, toMinutes(departParts));
   }
 
-  if (presentationEvent) {
-    blocks.push(
-      makeBlock({
-        type: "event",
-        title: presentationEvent.title,
-        meta: presentationEvent.location || presentationEvent.source_agent || "Event",
-        start: presentationStart,
-        end: presentationEnd,
-        location: presentationEvent.location || "",
-        event: presentationEvent,
-      })
-    );
+  if (arriveParts && (arriveParts.constraint === "before" || arriveParts.constraint === "at")) {
+    latest = toMinutes(arriveParts);
   }
 
-  let mercuryEnd = presentationEnd;
+  return { earliest, latest };
+}
 
-  if (mercuryTask) {
-    const mercuryStart = presentationEnd + buffer;
-    mercuryEnd = mercuryStart + 45;
+function taskWindow(task, rawRequest = "") {
+  const taskText = normalizeText(`${task?.title || ""} ${task?.description || ""} ${task?.due_at || ""}`);
+  const requestText = normalizeText(rawRequest);
 
-    blocks.push(
-      makeBlock({
-        type: "task",
-        title: mercuryTask.title,
-        meta: `${mercuryTask.priority || "medium"} priority · ${
-          mercuryTask.source_agent || "TaskAgent"
-        }`,
-        start: mercuryStart,
-        end: mercuryEnd,
-        task: mercuryTask,
-      })
-    );
+  if (taskText.includes("before heading")) {
+    return { earliest: 8 * 60 + 30, latest: 13 * 60, rank: 8 };
   }
 
-  let qcArrival = mercuryEnd;
-
-  if (routeBGCToQC) {
-    const duration = durationForRoute(routeBGCToQC, 40);
-    const start = mercuryEnd + buffer;
-    const end = start + duration;
-    qcArrival = end;
-
-    const block = makeBlock({
-      type: "route",
-      title: routeDisplayTitle(routeBGCToQC),
-      meta: `${duration} min by car · ${
-        routeBGCToQC.distance_km
-          ? `${routeBGCToQC.distance_km} km`
-          : routeBGCToQC.mode || "driving"
-      }`,
-      start,
-      end,
-      location: routeBGCToQC.destination || "",
-      route: routeBGCToQC,
-      conflict: end > 18 * 60,
-    });
-
-    blocks.push(block);
-    routeBlocks.push(block);
+  if (taskText.includes("before noon") || taskText.includes("before lunch")) {
+    return { earliest: 8 * 60 + 30, latest: 12 * 60, rank: 10 };
   }
 
-  let packageEnd = qcArrival;
-
-  if (packageTask) {
-    const packageStart = qcArrival + buffer;
-    packageEnd = packageStart + 35;
-
-    blocks.push(
-      makeBlock({
-        type: "task",
-        title: packageTask.title,
-        meta: `${packageTask.priority || "high"} priority · ${
-          packageTask.source_agent || "TaskAgent"
-        }`,
-        start: packageStart,
-        end: packageEnd,
-        task: packageTask,
-      })
-    );
+  if (taskText.includes("morning")) {
+    return { earliest: 8 * 60 + 30, latest: 12 * 60, rank: 15 };
   }
 
-  if (routeQCToHome) {
-    const duration = durationForRoute(routeQCToHome, 45);
-    const arriveBy = parseTimeToMinutes(routeQCToHome.arrive_by) ?? 19 * 60;
-    const latestStart = arriveBy - duration;
-    const start = Math.max(packageEnd + buffer, latestStart);
-    const end = start + duration;
+  const dueParts = extractTimeParts(task?.due_at);
 
-    const block = makeBlock({
-      type: "route",
-      title: routeDisplayTitle(routeQCToHome),
-      meta: `${duration} min by car · ${
-        routeQCToHome.distance_km
-          ? `${routeQCToHome.distance_km} km`
-          : routeQCToHome.mode || "driving"
-      }`,
-      start,
-      end,
-      location: routeQCToHome.destination || "",
-      route: routeQCToHome,
-      conflict: end > arriveBy || end > 20 * 60,
-    });
-
-    blocks.push(block);
-    routeBlocks.push(block);
+  if (dueParts && (dueParts.constraint === "before" || dueParts.constraint === "at")) {
+    return { earliest: 8 * 60 + 30, latest: toMinutes(dueParts), rank: 20 };
   }
 
-  const usedEventIds = new Set(
-    blocks.filter((block) => block.event).map((block) => block.event.id)
-  );
+  if (taskText.includes("after lunch")) {
+    return { earliest: 13 * 60, latest: null, rank: 30 };
+  }
 
-  for (const event of events || []) {
-    if (usedEventIds.has(event.id)) continue;
+  if (
+    taskText.includes("after previous fixed event") ||
+    taskText.includes("after previous activity") ||
+    taskText.includes("after fixed event") ||
+    taskText.includes("after the") ||
+    taskText.includes("after meeting") ||
+    taskText.includes("after review") ||
+    taskText.includes("after sync") ||
+    taskText.includes("after presentation")
+  ) {
+    return { earliest: 11 * 60 + 15, latest: null, rank: 35 };
+  }
 
-    const start = parseTimeToMinutes(event.start_at);
-    const end = parseTimeToMinutes(event.end_at);
+  if (dueParts && dueParts.constraint === "after") {
+    return { earliest: toMinutes(dueParts), latest: null, rank: 40 };
+  }
 
-    if (start === null) continue;
+  if (taskText.includes("afternoon")) {
+    return { earliest: 13 * 60, latest: null, rank: 45 };
+  }
 
-    blocks.push(
-      makeBlock({
+  if (taskText.includes("before going home") || taskText.includes("going home")) {
+    const homeDeadline = parseTimeToMinutes(task?.due_at) || parseTimeToMinutes(rawRequest);
+    return { earliest: 13 * 60, latest: homeDeadline, rank: 60 };
+  }
+
+  if (requestText.includes("after lunch") && !requestText.includes("before lunch")) {
+    return { earliest: 13 * 60, latest: null, rank: 70 };
+  }
+
+  return { earliest: 8 * 60 + 30, latest: null, rank: 80 };
+}
+
+function findEarliestSlot({
+  earliest,
+  duration,
+  blocks,
+  latest = null,
+  buffer = 20,
+}) {
+  let candidateStart = Math.max(8 * 60, earliest);
+  const sortedBlocks = [...blocks].sort((a, b) => a.start - b.start);
+
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const block of sortedBlocks) {
+      const paddedStart = block.start - buffer;
+      const paddedEnd = block.end + buffer;
+
+      if (overlaps(candidateStart, candidateStart + duration, paddedStart, paddedEnd)) {
+        candidateStart = paddedEnd;
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  const candidateEnd = candidateStart + duration;
+
+  return {
+    start: candidateStart,
+    end: candidateEnd,
+    conflict: latest !== null && candidateEnd > latest,
+  };
+}
+
+function findLatestSlotBefore({
+  latest,
+  duration,
+  blocks,
+  earliest = 8 * 60,
+  buffer = 20,
+}) {
+  let candidateEnd = latest;
+  let candidateStart = candidateEnd - duration;
+  const sortedBlocks = [...blocks].sort((a, b) => b.start - a.start);
+
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const block of sortedBlocks) {
+      const paddedStart = block.start - buffer;
+      const paddedEnd = block.end + buffer;
+
+      if (overlaps(candidateStart, candidateEnd, paddedStart, paddedEnd)) {
+        candidateEnd = paddedStart;
+        candidateStart = candidateEnd - duration;
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  return {
+    start: Math.max(earliest, candidateStart),
+    end: Math.max(earliest + duration, candidateEnd),
+    conflict: candidateStart < earliest,
+  };
+}
+
+function routeMatchesTask(route, task) {
+  const taskTitle = normalizeText(task?.title);
+  const taskText = normalizeText(`${task?.title || ""} ${task?.description || ""}`);
+  const destinationTaskTitle = normalizeText(route?.destination_task_title);
+  const purpose = normalizeText(route?.purpose);
+  const routeDestination = route?.__destinationKey || canonicalPlace(route?.resolved_destination || route?.destination);
+  const taskPlace = taskLocationKey(task);
+
+  if (destinationTaskTitle && taskTitle && textMatches(destinationTaskTitle, taskTitle)) return true;
+  if (purpose && taskText && textMatches(purpose, taskText)) return true;
+  if (routeDestination && taskPlace && routeDestination === taskPlace) return true;
+
+  return false;
+}
+
+function routeMatchesEvent(route, event) {
+  const eventTitle = normalizeText(event?.title);
+  const destinationEventTitle = normalizeText(route?.destination_event_title);
+  const routeDestination = route?.__destinationKey || canonicalPlace(route?.resolved_destination || route?.destination);
+  const eventPlace = eventLocationKey(event);
+
+  if (destinationEventTitle && eventTitle && textMatches(destinationEventTitle, eventTitle)) return true;
+  if (routeDestination && eventPlace && routeDestination === eventPlace) return true;
+
+  return false;
+}
+
+function buildFixedEventBlocks(events) {
+  return (events || [])
+    .map((event) => {
+      const start = parseTimeToMinutes(event.start_at);
+      const parsedEnd = parseTimeToMinutes(event.end_at);
+
+      if (start === null) return null;
+
+      const end = parsedEnd && parsedEnd > start ? parsedEnd : start + 60;
+
+      return makeBlock({
         type: "event",
         title: event.title,
         meta: event.location || event.source_agent || "Event",
         start,
-        end: end && end > start ? end : start + 60,
+        end,
         location: event.location || "",
         event,
-      })
-    );
+      });
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.start - b.start);
+}
+
+function findEventBlockForRoute(route, eventBlocks) {
+  const destination = route.__destinationKey || canonicalPlace(route.resolved_destination || route.destination);
+
+  const matches = (eventBlocks || []).filter((block) => {
+    if (!block.event) return false;
+    if (routeMatchesEvent(route, block.event)) return true;
+    return eventLocationKey(block.event) === destination;
+  });
+
+  if (matches.length === 0) return null;
+
+  return matches.sort((a, b) => a.start - b.start)[0];
+}
+
+function sameLocationEventClusterEnd(targetBlock, eventBlocks) {
+  if (!targetBlock) return null;
+
+  const location = eventLocationKey(targetBlock.event);
+  let clusterEnd = targetBlock.end;
+
+  const related = (eventBlocks || [])
+    .filter((block) => eventLocationKey(block.event) === location)
+    .sort((a, b) => a.start - b.start);
+
+  for (const block of related) {
+    if (block.start >= targetBlock.start - 90 && block.start <= clusterEnd + 20) {
+      clusterEnd = Math.max(clusterEnd, block.end);
+    }
   }
 
-  const usedTaskKeys = new Set(
-    blocks.filter((block) => block.task).map((block) => taskKey(block.task))
-  );
+  return clusterEnd;
+}
 
-  for (const task of tasks || []) {
+function findTaskForRoute(route, tasks, usedTaskKeys) {
+  return (tasks || []).find((task) => {
     const key = taskKey(task);
-    if (usedTaskKeys.has(key)) continue;
 
-    blocks.push(
-      makeBlock({
-        type: "task",
-        title: task.title,
-        meta: `${task.priority || "medium"} priority · ${
-          task.source_agent || "TaskAgent"
-        }`,
-        start: 10 * 60,
-        end: 10 * 60 + 45,
-        task,
-      })
-    );
+    if (!key || usedTaskKeys.has(key)) return false;
+
+    return routeMatchesTask(route, task);
+  });
+}
+
+function findOriginLocalTasks(route, tasks, usedTaskKeys) {
+  const origin = route.__originKey || canonicalPlace(route.resolved_origin || route.origin);
+
+  if (!origin) return [];
+
+  return (tasks || []).filter((task) => {
+    const key = taskKey(task);
+    const taskPlace = taskLocationKey(task);
+
+    if (!key || usedTaskKeys.has(key)) return false;
+    if (!taskPlace || taskPlace !== origin) return false;
+    if (routeMatchesTask(route, task)) return false;
+
+    return true;
+  });
+}
+
+function isReturnRoute(route) {
+  const text = normalizeText(`${route?.purpose || ""} ${route?.destination || ""} ${route?.resolved_destination || ""}`);
+  return (
+    text.includes("return") ||
+    text.includes("home") ||
+    text.includes("after completing") ||
+    Boolean(route?.arrive_by && !route?.destination_task_title && !route?.destination_event_title)
+  );
+}
+
+function makeTaskBlock(task, start, end, conflict = false) {
+  return makeBlock({
+    type: "task",
+    title: task.title,
+    meta: `${task.priority || "medium"} priority · ${
+      task.source_agent || "TaskAgent"
+    }`,
+    start,
+    end,
+    task,
+    conflict,
+  });
+}
+
+function scheduleTask({
+  task,
+  rawRequest,
+  blocks,
+  currentTime,
+  earliestOverride = null,
+  ignoreCurrentTimeForDeadline = false,
+}) {
+  const duration = 45;
+  const window = taskWindow(task, rawRequest);
+  const baseCurrentTime = ignoreCurrentTimeForDeadline && window.latest !== null
+    ? window.earliest - 20
+    : currentTime;
+  const earliest = Math.max(baseCurrentTime + 20, window.earliest, earliestOverride ?? 0);
+
+  const placed = findEarliestSlot({
+    earliest,
+    duration,
+    blocks,
+    latest: window.latest,
+    buffer: 20,
+  });
+
+  return makeTaskBlock(task, placed.start, placed.end, placed.conflict);
+}
+
+function scheduleRouteOnly({
+  route,
+  blocks,
+  currentTime,
+  eventBlocks,
+  targetEventBlock = null,
+}) {
+  const duration = durationForRoute(route, 35);
+  const window = routeWindow(route);
+
+  if (targetEventBlock) {
+    const arriveBy = parseTimeToMinutes(route.arrive_by);
+    const latest = arriveBy !== null
+      ? arriveBy - 10
+      : targetEventBlock.start - 20;
+
+    const placed = findLatestSlotBefore({
+      latest,
+      duration,
+      blocks,
+      earliest: 8 * 60,
+      buffer: 15,
+    });
+
+    const block = makeBlock({
+      type: "route",
+      title: routeDisplayTitle(route),
+      meta: buildRouteMeta(route, duration),
+      start: placed.start,
+      end: placed.end,
+      location: route.resolved_destination || route.destination || "",
+      route,
+      conflict: placed.conflict,
+    });
+
+    const clusterEnd = sameLocationEventClusterEnd(targetEventBlock, eventBlocks) ?? targetEventBlock.end;
+
+    return {
+      block,
+      nextTime: Math.max(currentTime, clusterEnd),
+    };
+  }
+
+  const placed = findEarliestSlot({
+    earliest: Math.max(currentTime + 20, window.earliest),
+    duration,
+    blocks,
+    latest: window.latest,
+    buffer: 20,
+  });
+
+  const block = makeBlock({
+    type: "route",
+    title: routeDisplayTitle(route),
+    meta: buildRouteMeta(route, duration),
+    start: placed.start,
+    end: placed.end,
+    location: route.resolved_destination || route.destination || "",
+    route,
+    conflict: placed.conflict,
+  });
+
+  return {
+    block,
+    nextTime: block.end,
+  };
+}
+
+function scheduleRouteAndTaskPackage({
+  route,
+  task,
+  rawRequest,
+  blocks,
+  currentTime,
+}) {
+  const routeDuration = durationForRoute(route, 35);
+  const taskDuration = 45;
+  const routeTaskBuffer = 20;
+  const packageDuration = routeDuration + routeTaskBuffer + taskDuration;
+  const taskTiming = taskWindow(task, rawRequest);
+  const routeTiming = routeWindow(route);
+  const earliest = Math.max(currentTime + 20, taskTiming.earliest, routeTiming.earliest);
+
+  const placed = findEarliestSlot({
+    earliest,
+    duration: packageDuration,
+    blocks,
+    latest: taskTiming.latest,
+    buffer: 20,
+  });
+
+  const routeStart = placed.start;
+  const routeEnd = routeStart + routeDuration;
+  const taskStart = routeEnd + routeTaskBuffer;
+  const taskEnd = taskStart + taskDuration;
+
+  const routeBlock = makeBlock({
+    type: "route",
+    title: routeDisplayTitle(route),
+    meta: buildRouteMeta(route, routeDuration),
+    start: routeStart,
+    end: routeEnd,
+    location: route.resolved_destination || route.destination || "",
+    route,
+    conflict: placed.conflict,
+  });
+
+  const taskBlock = makeTaskBlock(task, taskStart, taskEnd, placed.conflict);
+
+  return {
+    routeBlock,
+    taskBlock,
+    nextTime: taskEnd,
+  };
+}
+
+function scheduleRemainingBeforeReturn({
+  tasks,
+  usedTaskKeys,
+  rawRequest,
+  blocks,
+  currentTime,
+}) {
+  let nextTime = currentTime;
+
+  const remaining = (tasks || [])
+    .filter((task) => {
+      const key = taskKey(task);
+      if (!key || usedTaskKeys.has(key)) return false;
+      return !taskLocationKey(task);
+    })
+    .sort((a, b) => {
+      const aWindow = taskWindow(a, rawRequest);
+      const bWindow = taskWindow(b, rawRequest);
+      if (aWindow.rank !== bWindow.rank) return aWindow.rank - bWindow.rank;
+      return (aWindow.latest ?? 9999) - (bWindow.latest ?? 9999);
+    });
+
+  for (const task of remaining) {
+    const taskBlock = scheduleTask({
+      task,
+      rawRequest,
+      blocks,
+      currentTime: nextTime,
+    });
+
+    blocks.push(taskBlock);
+    usedTaskKeys.add(taskKey(task));
+    nextTime = Math.max(nextTime, taskBlock.end);
+  }
+
+  return nextTime;
+}
+
+function buildPlannerData(tasks, events, finalResponse, rawRequest = "") {
+  const blocks = buildFixedEventBlocks(events);
+  const routeBlocks = [];
+  const eventBlocks = [...blocks];
+  const usedRouteKeys = new Set();
+  const usedTaskKeys = new Set();
+
+  const uniqueTravelEstimates = getUniqueTravelEstimates(
+    finalResponse?.travel_estimates || []
+  ).map((route, index) => ({
+    ...route,
+    __uniqueKey: `${route.__routeKey || `${route.__originKey}->${route.__destinationKey}`}-${index}`,
+  }));
+
+  let currentTime = 8 * 60 + 30;
+
+  for (const route of uniqueTravelEstimates) {
+    if (usedRouteKeys.has(route.__uniqueKey)) continue;
+
+    const localTasks = findOriginLocalTasks(route, tasks, usedTaskKeys).sort((a, b) => {
+      const aWindow = taskWindow(a, rawRequest);
+      const bWindow = taskWindow(b, rawRequest);
+      if (aWindow.rank !== bWindow.rank) return aWindow.rank - bWindow.rank;
+      return (aWindow.latest ?? 9999) - (bWindow.latest ?? 9999);
+    });
+
+    for (const localTask of localTasks) {
+      const taskBlock = scheduleTask({
+        task: localTask,
+        rawRequest,
+        blocks,
+        currentTime,
+        ignoreCurrentTimeForDeadline: true,
+      });
+      blocks.push(taskBlock);
+      usedTaskKeys.add(taskKey(localTask));
+      currentTime = Math.max(currentTime, taskBlock.end);
+    }
+
+    if (isReturnRoute(route)) {
+      currentTime = scheduleRemainingBeforeReturn({
+        tasks,
+        usedTaskKeys,
+        rawRequest,
+        blocks,
+        currentTime,
+      });
+    }
+
+    const targetEventBlock = findEventBlockForRoute(route, eventBlocks);
+    const targetTask = findTaskForRoute(route, tasks, usedTaskKeys);
+
+    if (targetTask && !targetEventBlock) {
+      const scheduledPackage = scheduleRouteAndTaskPackage({
+        route,
+        task: targetTask,
+        rawRequest,
+        blocks,
+        currentTime,
+      });
+
+      blocks.push(scheduledPackage.routeBlock);
+      blocks.push(scheduledPackage.taskBlock);
+      routeBlocks.push(scheduledPackage.routeBlock);
+      usedRouteKeys.add(route.__uniqueKey);
+      usedTaskKeys.add(taskKey(targetTask));
+      currentTime = Math.max(currentTime, scheduledPackage.nextTime);
+      continue;
+    }
+
+    const scheduledRoute = scheduleRouteOnly({
+      route,
+      blocks,
+      currentTime,
+      eventBlocks,
+      targetEventBlock,
+    });
+
+    blocks.push(scheduledRoute.block);
+    routeBlocks.push(scheduledRoute.block);
+    usedRouteKeys.add(route.__uniqueKey);
+
+    currentTime = Math.max(currentTime, scheduledRoute.nextTime);
+
+    if (targetTask) {
+      const taskBlock = scheduleTask({
+        task: targetTask,
+        rawRequest,
+        blocks,
+        currentTime: scheduledRoute.block.end,
+        earliestOverride: scheduledRoute.block.end + 20,
+      });
+
+      blocks.push(taskBlock);
+      usedTaskKeys.add(taskKey(targetTask));
+      currentTime = Math.max(currentTime, taskBlock.end);
+    }
+  }
+
+  const sortedTasks = [...(tasks || [])].sort((a, b) => {
+    const aWindow = taskWindow(a, rawRequest);
+    const bWindow = taskWindow(b, rawRequest);
+
+    if (aWindow.rank !== bWindow.rank) return aWindow.rank - bWindow.rank;
+
+    const aLatest = aWindow.latest ?? 9999;
+    const bLatest = bWindow.latest ?? 9999;
+
+    return aLatest - bLatest;
+  });
+
+  for (const task of sortedTasks) {
+    const key = taskKey(task);
+
+    if (!key || usedTaskKeys.has(key)) continue;
+
+    const taskBlock = scheduleTask({
+      task,
+      rawRequest,
+      blocks,
+      currentTime,
+      ignoreCurrentTimeForDeadline: true,
+    });
+
+    blocks.push(taskBlock);
+    usedTaskKeys.add(key);
+    currentTime = Math.max(currentTime, taskBlock.end);
   }
 
   const dayPlan = assignCalendarLanes(
@@ -649,7 +1131,7 @@ function buildPlannerData(tasks, events, finalResponse) {
       .filter((block) => block.end > block.start)
       .sort((a, b) => {
         if (a.start !== b.start) return a.start - b.start;
-        return a.end - b.end;
+        return blockPriority(a) - blockPriority(b);
       })
   );
 
@@ -675,14 +1157,10 @@ function buildPlannerData(tasks, events, finalResponse) {
   };
 }
 
-function overlaps(aStart, aEnd, bStart, bEnd) {
-  return aStart < bEnd && aEnd > bStart;
-}
-
 function assignCalendarLanes(blocks) {
   const sorted = [...blocks].sort((a, b) => {
     if (a.start !== b.start) return a.start - b.start;
-    return a.end - b.end;
+    return blockPriority(a) - blockPriority(b);
   });
 
   const clusters = [];
@@ -739,7 +1217,8 @@ function calendarBlockStyle(block) {
   const dayStart = 8 * 60;
   const step = 5;
   const rowStart = Math.max(1, Math.floor((block.start - dayStart) / step) + 1);
-  const rowEnd = Math.max(rowStart + 2, Math.ceil((block.end - dayStart) / step) + 1);
+  const naturalRowEnd = Math.ceil((block.end - dayStart) / step) + 1;
+  const rowEnd = Math.max(rowStart + 6, naturalRowEnd);
 
   const laneCount = Math.max(1, block.laneCount || 1);
   const lane = Math.max(0, block.lane || 0);
@@ -754,7 +1233,7 @@ function calendarGridStyle(dayPlan) {
   const maxLaneCount = Math.max(1, ...dayPlan.map((block) => block.laneCount || 1));
 
   return {
-    gridTemplateColumns: `repeat(${maxLaneCount}, minmax(0, 1fr))`,
+    gridTemplateColumns: `repeat(${maxLaneCount}, minmax(240px, 1fr))`,
   };
 }
 
@@ -831,7 +1310,7 @@ export default async function WorkflowDetailPage({ params }) {
   const finalResponse = workflow?.final_response || {};
   const displayEvents = (events || []).filter(isDisplayEvent);
   const displayTasks = getDisplayTasks(tasks, displayEvents, workflow.raw_request);
-  const plannerData = buildPlannerData(displayTasks, displayEvents, finalResponse);
+  const plannerData = buildPlannerData(displayTasks, displayEvents, finalResponse, workflow.raw_request);
   const dayPlan = plannerData.dayPlan;
   const orderedTravelEstimates = plannerData.scheduledRoutes;
   const base = result.base;
@@ -872,7 +1351,7 @@ export default async function WorkflowDetailPage({ params }) {
           ) : (
             <div className="responsive-card-grid">
               {displayTasks.map((task) => (
-                <div className="item item-soft" key={task.id}>
+                <div className="item item-soft" key={task.id || taskKey(task)}>
                   <div className="item-title">{task.title}</div>
                   <div className="small">{task.description || "No description"}</div>
                   <div className="item-meta">
@@ -904,7 +1383,7 @@ export default async function WorkflowDetailPage({ params }) {
           ) : (
             <div className="responsive-card-grid">
               {displayEvents.map((event) => (
-                <div className="item item-soft" key={event.id}>
+                <div className="item item-soft" key={event.id || eventKey(event)}>
                   <div className="item-title">{event.title}</div>
                   <div className="small">
                     {event.start_at || "—"} → {event.end_at || "—"}

@@ -1386,3 +1386,89 @@ textarea {
     display: none;
   }
 }
+/* Day planner readability override.
+   This intentionally overrides the older fixed 72px hour rows and 864px grid.
+   One hour = 150px. Each 5-minute grid row = 12.5px. */
+
+.outlook-hour {
+  height: 150px !important;
+  padding: 12px 10px !important;
+}
+
+.outlook-calendar-grid {
+  height: 1800px !important;
+  grid-template-rows: repeat(144, 12.5px) !important;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(23, 32, 51, 0.06) 0,
+      rgba(23, 32, 51, 0.06) 1px,
+      transparent 1px,
+      transparent 75px
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.48), rgba(248, 251, 255, 0.62)) !important;
+}
+
+.calendar-block {
+  min-height: 92px !important;
+  padding: 14px 16px !important;
+  overflow: visible !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-start !important;
+  gap: 4px !important;
+}
+
+.calendar-block-kind {
+  flex: 0 0 auto !important;
+}
+
+.calendar-block-title {
+  font-size: 14px !important;
+  line-height: 1.35 !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+}
+
+.calendar-block-time {
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+}
+
+.calendar-block-meta {
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+}
+
+.day-block-warning {
+  flex: 0 0 auto !important;
+  white-space: normal !important;
+}
+
+@media (max-width: 760px) {
+  .outlook-hour {
+    height: 130px !important;
+  }
+
+  .outlook-calendar-grid {
+    height: 1560px !important;
+    grid-template-rows: repeat(144, 10.833px) !important;
+  }
+
+  .calendar-block {
+    min-height: 86px !important;
+    padding: 12px 14px !important;
+  }
+
+  .calendar-block-meta {
+    display: block !important;
+    font-size: 11px !important;
+  }
+}
